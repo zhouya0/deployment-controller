@@ -25,7 +25,9 @@ func main() {
 	stopCh := signals.SetupSignalHandler()
 
 	// set up mysql
-	InitDB()
+	if err := InitDB(); err != nil {
+		klog.Fatalf("Error connecting Mysql: %s", err.Error())
+	}
 
 	cfg, err := clientcmd.BuildConfigFromFlags(masterURL, kubeconfig)
 	if err != nil {

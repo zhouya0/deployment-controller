@@ -22,6 +22,11 @@ import (
 
 const controllerAgentName = "deployment-controller"
 
+type Delta struct {
+	key   string
+	event string
+}
+
 type Controller struct {
 	kubeclientset     kubernetes.Interface
 	deploymentsLister appslisters.DeploymentLister
@@ -52,28 +57,51 @@ func NewController(
 	klog.Info("Setting up event handlers")
 
 	deploymentInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: controller.handleObject,
+		AddFunc: controller.handleAdd,
 		UpdateFunc: func(old, new interface{}) {
 			newDepl := new.(*appsv1.Deployment)
 			oldDepl := old.(*appsv1.Deployment)
 			if newDepl.ResourceVersion == oldDepl.ResourceVersion {
 				return
 			}
-			controller.handleObject(new)
+			controller.handleUpdate(new)
 		},
-		DeleteFunc: controller.handleObject,
+		DeleteFunc: controller.handleDelete,
 	})
 	return controller
 }
 
-func (c *Controller) handleObject(obj interface{}) {
+func (c *Controller) handleAdd(obj interface{}) {
 	var key string
 	var err error
 	if key, err = cache.MetaNamespaceKeyFunc(obj); err != nil {
 		utilruntime.HandleError(err)
 		return
 	}
-	c.workqueue.Add(key)
+	d := Delta{key: key, event: "Add"}
+	c.workqueue.Add(d)
+}
+
+func (c *Controller) handleUpdate(obj interface{}) {
+	var key string
+	var err error
+	if key, err = cache.MetaNamespaceKeyFunc(obj); err != nil {
+		utilruntime.HandleError(err)
+		return
+	}
+	d := Delta{key: key, event: "Update"}
+	c.workqueue.Add(d)
+}
+
+func (c *Controller) handleDelete(obj interface{}) {
+	var key string
+	var err error
+	if key, err = cache.MetaNamespaceKeyFunc(obj); err != nil {
+		utilruntime.HandleError(err)
+		return
+	}
+	d := Delta{key: key, event: "Delete"}
+	c.workqueue.Add(d)
 }
 
 func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) error {
@@ -119,31 +147,37 @@ func (c *Controller) processNextWorkItem() bool {
 		defer c.workqueue.Done(obj)
 
 		// handle logic
-		var key string
+		var d Delta
 		var ok bool
 
-		if key, ok = obj.(string); !ok {
+		if d, ok = obj.(Delta); !ok {
 			c.workqueue.Forget(obj)
 			utilruntime.HandleError(fmt.Errorf("expected string in workqueue but got %#v", obj))
 			return nil
 		}
 
-		namespace, name, err := cache.SplitMetaNamespaceKey(key)
+		namespace, name, err := cache.SplitMetaNamespaceKey(d.key)
 		if err != nil {
-			utilruntime.HandleError(fmt.Errorf("invalid resource key: %s", key))
+			utilruntime.HandleError(fmt.Errorf("invalid resource key: %s", d.key))
 			return nil
 		}
 		dp, err := c.deploymentsLister.Deployments(namespace).Get(name)
-		if err != nil {
+		if err != nil && d.event != "Delete" {
 			if errors.IsNotFound(err) {
-				utilruntime.HandleError(fmt.Errorf("deployment '%s' in work queue no longer exists", key))
+				utilruntime.HandleError(fmt.Errorf("deployment '%s' in work queue no longer exists", d.key))
 				return nil
 			}
 			return err
 		}
 		if dp != nil {
-			fmt.Println("This is the output", dp.Name, dp.Status.ReadyReplicas)
-			InserDeployment(dp)
+			fmt.Println("This is the output", dp.Name, dp.Status.ReadyReplicas, dp.Status.Replicas, dp.Namespace)
+			if d.event == "Add" {
+				InserDeployment(dp)
+			} else if d.event == "Update" {
+				UpdateDeployment(dp)
+			}
+		} else {
+			DeleteDeployment(d.key)
 		}
 
 		c.workqueue.Forget(obj)
