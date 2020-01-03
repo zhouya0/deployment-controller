@@ -3,6 +3,7 @@ module deployment-controller
 go 1.13
 
 require (
+	github.com/go-sql-driver/mysql v1.4.1
 	k8s.io/api v0.17.0
 	k8s.io/apimachinery v0.17.0
 	k8s.io/client-go v0.17.0

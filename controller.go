@@ -6,6 +6,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	appsinformers "k8s.io/client-go/informers/apps/v1"
@@ -66,7 +67,13 @@ func NewController(
 }
 
 func (c *Controller) handleObject(obj interface{}) {
-	c.workqueue.Add(obj)
+	var key string
+	var err error
+	if key, err = cache.MetaNamespaceKeyFunc(obj); err != nil {
+		utilruntime.HandleError(err)
+		return
+	}
+	c.workqueue.Add(key)
 }
 
 func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) error {
@@ -112,7 +119,32 @@ func (c *Controller) processNextWorkItem() bool {
 		defer c.workqueue.Done(obj)
 
 		// handle logic
-		fmt.Print(obj)
+		var key string
+		var ok bool
+
+		if key, ok = obj.(string); !ok {
+			c.workqueue.Forget(obj)
+			utilruntime.HandleError(fmt.Errorf("expected string in workqueue but got %#v", obj))
+			return nil
+		}
+
+		namespace, name, err := cache.SplitMetaNamespaceKey(key)
+		if err != nil {
+			utilruntime.HandleError(fmt.Errorf("invalid resource key: %s", key))
+			return nil
+		}
+		dp, err := c.deploymentsLister.Deployments(namespace).Get(name)
+		if err != nil {
+			if errors.IsNotFound(err) {
+				utilruntime.HandleError(fmt.Errorf("deployment '%s' in work queue no longer exists", key))
+				return nil
+			}
+			return err
+		}
+		if dp != nil {
+			fmt.Println("This is the output", dp.Name, dp.Status.ReadyReplicas)
+			InserDeployment(dp)
+		}
 
 		c.workqueue.Forget(obj)
 		klog.Infof("Successfully synced")
