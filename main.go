@@ -9,14 +9,13 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog"
 
-	"deployment-controller/pkg/signals"
+	"k8s.io/sample-controller/pkg/signals"
 )
 
 var (
 	masterURL  string
 	kubeconfig string
 )
-
 
 func main() {
 	klog.InitFlags(nil)
@@ -27,7 +26,7 @@ func main() {
 
 	cfg, err := clientcmd.BuildConfigFromFlags(masterURL, kubeconfig)
 	if err != nil {
-		klog.Fatalf("Error building kubeconfig: %s", err.Error())		
+		klog.Fatalf("Error building kubeconfig: %s", err.Error())
 	}
 
 	kubeClient, err := kubernetes.NewForConfig(cfg)
